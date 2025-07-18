@@ -121,10 +121,10 @@ module "db" {
   version = "6.5.4"
   identifier = "devops-interview-db"
   engine            = "postgres"
+  family = "postgres15"
   engine_version    = "15.3"
   instance_class    = "db.t3.micro"
   allocated_storage = 20
-  name              = "appdb"
   username          = "appuser"
   password          = aws_secretsmanager_secret_version.db_password_value.secret_string
   subnet_ids        = [module.vpc.private_subnets[0], module.vpc.private_subnets[1]]
@@ -139,16 +139,16 @@ module "eks" {
   version         = "20.8.4"
   cluster_name    = "devops-interview-eks"
   cluster_version = "1.29"
-  subnets         = [module.vpc.private_subnets[2], module.vpc.private_subnets[3]]
+  subnet_ids         = [module.vpc.private_subnets[2], module.vpc.private_subnets[3]]
   vpc_id          = module.vpc.vpc_id
 
-  node_groups = {
+  eks_managed_node_groups = {
     default = {
-      desired_capacity = 2
-      max_capacity     = 3
-      min_capacity     = 1
+      desired_size = 2
+      max_size     = 3
+      min_size     = 1
       instance_type    = "t3.medium"
-      subnets          = [module.vpc.private_subnets[2], module.vpc.private_subnets[3]]
+      subnet_ids          = [module.vpc.private_subnets[2], module.vpc.private_subnets[3]]
       additional_security_group_ids = [aws_security_group.eks_nodes.id]
     }
   }
@@ -161,10 +161,12 @@ data "aws_eks_cluster" "cluster" {
 
 data "aws_eks_cluster_auth" "cluster" {
   name = module.eks.cluster_name
+  depends_on = [module.eks]
 }
 
 data "tls_certificate" "oidc" {
   url = data.aws_eks_cluster.cluster.identity[0].oidc[0].issuer
+  depends_on = [module.eks]
 }
 
 resource "aws_iam_openid_connect_provider" "oidc" {
@@ -252,7 +254,7 @@ data "http" "alb_policy" {
 
 resource "aws_iam_policy" "alb_controller" {
   name   = "AWSLoadBalancerControllerIAMPolicy"
-  policy = data.http.alb_policy.body
+  policy = data.http.alb_policy.response_body
 }
 
 data "aws_iam_policy_document" "alb_controller_assume_role" {

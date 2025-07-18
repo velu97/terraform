@@ -1,0 +1,77 @@
+pipeline {
+    agent any
+
+    environment {
+        AWS_REGION = 'ap-south-1'
+        ECR_REPO   = 'devops-interview-ror-app'
+        EKS_CLUSTER = 'devops-interview-eks'
+        K8S_NAMESPACE = 'rails-app'
+        IMAGE_TAG = "${env.BUILD_NUMBER}"
+        AWS_ACCOUNT_ID = credentials('aws-account-id')
+        AWS_ACCESS_KEY_ID = credentials('aws-access-key-id')
+        AWS_SECRET_ACCESS_KEY = credentials('aws-secret-access-key')
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh """
+                    docker build -t $ECR_REPO:$IMAGE_TAG .
+                    docker tag $ECR_REPO:$IMAGE_TAG $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO:$IMAGE_TAG
+                """
+            }
+        }
+
+        stage('Login to ECR') {
+            steps {
+                sh """
+                    aws ecr get-login-password --region $AWS_REGION | \
+                    docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+                """
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                sh """
+                    docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO:$IMAGE_TAG
+                """
+            }
+        }
+
+        stage('Update Kubeconfig') {
+            steps {
+                sh """
+                    aws eks update-kubeconfig --region $AWS_REGION --name $EKS_CLUSTER
+                """
+            }
+        }
+
+        stage('Update Image in Manifest') {
+            steps {
+                sh """
+                    sed -i 's|<ECR_IMAGE_URI>|$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO:$IMAGE_TAG|g' k8s/deployment.yaml
+                """
+            }
+        }
+
+        stage('Deploy to EKS') {
+            steps {
+                sh """
+                    kubectl apply -n $K8S_NAMESPACE -f k8s/
+                """
+            }
+        }
+    }
+    post {
+        always {
+            cleanWs()
+        }
+    }
+}
